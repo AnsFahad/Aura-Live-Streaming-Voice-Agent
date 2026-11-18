@@ -72,6 +72,34 @@ header {
     letter-spacing: 0.05em;
 }
 
+.mode-select {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.45rem 0.8rem;
+    border-radius: 0.5rem;
+    font-size: 0.85rem;
+    outline: none;
+    cursor: pointer;
+}
+
+.mode-select option {
+    background: var(--bg-card);
+    color: var(--text-primary);
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+    background: rgba(244, 63, 94, 0.2);
+    border-color: var(--accent-rose);
+    color: var(--accent-rose);
+}
+
 .connection-pill {
     display: flex;
     align-items: center;

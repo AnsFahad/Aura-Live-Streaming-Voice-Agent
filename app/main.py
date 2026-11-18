@@ -98,6 +98,8 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                             session._schedule_pipeline(user_text)
                         else:
                             await session.asr.inject_client_transcript(user_text, is_final=False)
+                    elif data.get("type") == "barge_in_interrupt":
+                        await session._trigger_barge_in()
                     elif data.get("type") == "ping":
                         await session._send_control({"type": "pong"})
                 except Exception as e:

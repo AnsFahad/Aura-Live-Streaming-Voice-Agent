@@ -113,8 +113,8 @@ class VoiceActivityDetector:
             prob = self.vad.process_frame(audio_float32)
             last_prob = prob
 
-            effective_threshold = 0.72 if assistant_is_speaking else self.threshold
-            barge_in_needed_frames = max(4, self.barge_in_consecutive_frames)
+            effective_threshold = 0.58 if assistant_is_speaking else self.threshold
+            barge_in_needed_frames = max(2, self.barge_in_consecutive_frames)
 
             if prob >= effective_threshold:
                 self.consecutive_speech_frames += 1
