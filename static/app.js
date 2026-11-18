@@ -30,6 +30,7 @@ class AuraVoiceClient {
         this.orb = document.getElementById("orb");
         this.statusLabel = document.getElementById("statusLabel");
         this.btnToggle = document.getElementById("btnToggle");
+        this.btnStopResponse = document.getElementById("btnStopResponse");
         this.voiceSelect = document.getElementById("voiceSelect");
         this.audioModeSelect = document.getElementById("audioModeSelect");
         this.connDot = document.getElementById("connDot");
@@ -55,6 +56,9 @@ class AuraVoiceClient {
 
     initEventListeners() {
         this.btnToggle.addEventListener("click", () => this.toggleMicrophone());
+        if (this.btnStopResponse) {
+            this.btnStopResponse.addEventListener("click", () => this.stopResponse());
+        }
         this.orb.addEventListener("click", () => this.toggleMicrophone());
         this.btnSend.addEventListener("click", () => this.sendTextMessage());
         this.textInput.addEventListener("keydown", (e) => {
@@ -404,6 +408,29 @@ class AuraVoiceClient {
             this.valBargeIn.textContent = msg.barge_in_count;
         }
 
+        if (this.isRecording) {
+            this.safeStartRecognition();
+        }
+    }
+
+    stopResponse() {
+        console.warn("🛑 MANUAL STOP RESPONSE clicked by user.");
+        this.flushAudioPlayback();
+
+        this.orb.classList.remove("speaking");
+        this.orb.classList.add("interrupted");
+        setTimeout(() => this.orb.classList.remove("interrupted"), 400);
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: "barge_in_interrupt" }));
+        }
+
+        const currentCount = parseInt(this.valBargeIn ? this.valBargeIn.textContent : "0") || 0;
+        if (this.valBargeIn) {
+            this.valBargeIn.textContent = currentCount + 1;
+        }
+
+        this.statusLabel.textContent = "Response stopped. Listening...";
         if (this.isRecording) {
             this.safeStartRecognition();
         }

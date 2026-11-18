@@ -245,6 +245,19 @@ main {
     color: white;
 }
 
+.btn-stop {
+    background: rgba(244, 63, 94, 0.15);
+    color: #f43f5e;
+    border: 1px solid rgba(244, 63, 94, 0.4);
+}
+
+.btn-stop:hover {
+    background: #f43f5e;
+    color: #ffffff;
+    box-shadow: 0 4px 15px rgba(244, 63, 94, 0.4);
+    transform: translateY(-2px);
+}
+
 .conversation-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
