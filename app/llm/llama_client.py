@@ -8,12 +8,10 @@ from app.config import settings
 
 logger = logging.getLogger("aura.llm")
 
-AURA_SYSTEM_PROMPT = """You are Aura, an ultra-fast, intelligent, and natural conversational voice AI.
-You talk like a real human: warm, concise, engaging, and direct.
-Guidelines:
-- Keep answers brief and conversational (1 to 2 short sentences max).
-- Do not use markdown bullet points, asterisks, or formatting, since your response will be spoken aloud by TTS.
-- Sound natural, friendly, and helpful.
+AURA_SYSTEM_PROMPT = """You are Aura, an ultra-fast, natural conversational voice assistant.
+Always answer in 1 or 2 short, direct, conversational sentences (under 30 words maximum).
+Never use markdown, asterisks, bullet points, numbered lists, or headers, because your output is spoken directly aloud to the user.
+Answer any question helpfully and naturally.
 """
 
 class LlamaClient:
@@ -36,10 +34,10 @@ class LlamaClient:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.6,
-        max_tokens: int = 250
+        max_tokens: int = 70
     ) -> AsyncGenerator[str, None]:
         """
-        Streams token chunks from Llama 3 asynchronously.
+        Streams token chunks from LLM asynchronously.
         Handles asyncio.CancelledError cleanly on barge-in.
         """
         if self.is_mock:
@@ -57,7 +55,7 @@ class LlamaClient:
             if m.get("role") != "system":
                 payload_messages.append(m)
 
-        candidate_models = [self.model, "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "allam-2-7b"]
+        candidate_models = ["qwen/qwen3.8-27b", self.model, "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
         # Deduplicate while preserving order
         candidate_models = list(dict.fromkeys(candidate_models))
 

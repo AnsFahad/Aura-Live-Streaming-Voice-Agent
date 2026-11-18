@@ -285,7 +285,7 @@ class AuraVoiceClient {
         }
 
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.08;
+        utterance.rate = 1.15;
         utterance.pitch = 1.0;
 
         if (this.selectedVoice) {

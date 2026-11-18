@@ -155,7 +155,10 @@ class SessionContext:
         start_time = self.speech_end_timestamp or time.perf_counter()
         logger.info(f"Starting response generation for: '{user_text}'")
 
-        # Update conversation context
+        # Keep sliding window of last 4 messages to prevent prompt token accumulation & latency drift
+        if len(self.conversation_history) > 4:
+            self.conversation_history = self.conversation_history[-4:]
+
         self.conversation_history.append({"role": "user", "content": user_text})
         self.sentence_buffer.reset()
 
@@ -229,15 +232,12 @@ class SessionContext:
             })
 
         if settings.is_mock_tts:
-            # Deliver complete sentence chunk to client for natural human voice playback!
+            # Deliver sentence chunk to client immediately for instant voice playback
             await self._send_control({
                 "type": "speak_sentence",
                 "text": sentence,
                 "is_last": is_last
             })
-            # Sleep brief duration proportional to words to maintain natural conversational pacing
-            word_count = len(sentence.split())
-            await asyncio.sleep(min(1.5, word_count * 0.25))
             return
 
         async for audio_chunk in self.tts.stream_speech(sentence, is_last_chunk=is_last):
