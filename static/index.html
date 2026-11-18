@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aura: Live Streaming Voice Agent</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <div class="brand-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                    <line x1="12" y1="19" x2="12" y2="22"></line>
+                </svg>
+            </div>
+            <div>
+                <h1>Aura <span class="tag">Voice Agent</span></h1>
+            </div>
+        </div>
+
+        <div class="connection-pill">
+            <div id="connDot" class="dot"></div>
+            <span id="connStatus">Connecting...</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Main Voice Conversation Section -->
+        <section class="agent-container">
+            <div class="visualizer-card">
+                <div class="orb-container">
+                    <div id="orb" class="orb" title="Click to start/stop talking">
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="22"></line>
+                        </svg>
+                    </div>
+                </div>
+
+                <div id="statusLabel" class="status-label">Initializing audio pipeline...</div>
+
+                <div class="controls-row">
+                    <button id="btnToggle" class="btn btn-primary">Start Microphone</button>
+                </div>
+            </div>
+
+            <!-- Real-time Conversation Stream -->
+            <div class="conversation-card">
+                <div class="conversation-header">Real-Time Conversation Stream</div>
+                <div id="chatHistory" class="chat-history">
+                    <div class="message-row">
+                        <div class="message-role assistant">Aura</div>
+                        <div class="message-bubble">
+                            Hello! I am Aura, your low-latency voice agent. Speak into your microphone to chat with me. Try interrupting me while I speak to test barge-in handling!
+                        </div>
+                    </div>
+                </div>
+
+                <div class="text-input-bar">
+                    <input type="text" id="textInput" placeholder="Or type a message to test pipeline..." />
+                    <button id="btnSend" class="btn btn-primary" style="padding: 0.75rem 1.25rem;">Send</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Sidebar: Latency Metrics & Architecture Overview -->
+        <aside class="sidebar">
+            <div class="metrics-panel">
+                <div class="metric-card">
+                    <div class="metric-title">Response Latency (TTFA)</div>
+                    <div id="valTtfa" class="metric-value highlight">-- ms</div>
+                    <span class="badge-target">⚡ Target &lt; 500ms</span>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-title">Time to First Token (TTFT)</div>
+                    <div id="valTtft" class="metric-value">-- ms</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-title">Barge-in Interrupts</div>
+                    <div id="valBargeIn" class="metric-value">0</div>
+                    <span style="font-size: 0.75rem; color: var(--text-muted); display:block; margin-top: 0.25rem;">
+                        Silero VAD 95% Accuracy
+                    </span>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-title">Live VAD Speech Activity</div>
+                    <div class="vad-bar-container">
+                        <div id="vadBar" class="vad-bar"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="architecture-card">
+                <h3>Architecture Specs</h3>
+                <div class="arch-item">
+                    <span class="arch-label">Pipeline</span>
+                    <span class="arch-val">Asyncio WebSockets</span>
+                </div>
+                <div class="arch-item">
+                    <span class="arch-label">VAD Engine</span>
+                    <span class="arch-val">Silero VAD (ONNX)</span>
+                </div>
+                <div class="arch-item">
+                    <span class="arch-label">Speech to Text</span>
+                    <span class="arch-val">Deepgram Live ASR</span>
+                </div>
+                <div class="arch-item">
+                    <span class="arch-label">LLM Engine</span>
+                    <span class="arch-val">Llama 3 (Streaming)</span>
+                </div>
+                <div class="arch-item">
+                    <span class="arch-label">Text to Speech</span>
+                    <span class="arch-val">Cartesia AI Sonic</span>
+                </div>
+                <div class="arch-item">
+                    <span class="arch-label">Buffering</span>
+                    <span class="arch-val">Sentence Boundary</span>
+                </div>
+                <div class="arch-item">
+                    <span class="arch-label">Concurrency</span>
+                    <span class="arch-val">100 Concurrent Sessions</span>
+                </div>
+                <div class="arch-item">
+                    <span class="arch-label">Active Mode</span>
+                    <span id="valMode" class="arch-val">Detecting...</span>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
