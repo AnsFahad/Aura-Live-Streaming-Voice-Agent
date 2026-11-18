@@ -8,6 +8,7 @@ class AuraVoiceClient {
         this.scriptProcessor = null;
         this.zeroGain = null;
         this.recognition = null;
+        this.recognitionRunning = false;
         this.isRecording = false;
 
         // Audio playback & speech queue state
@@ -18,7 +19,12 @@ class AuraVoiceClient {
         this.speechQueue = [];
         this.isSpeakingQueueActive = false;
         this.selectedVoice = null;
-        this.audioMode = "headphones"; // Default to headphones for seamless full-duplex barge-in
+        this.currentUtterance = null; // Strong reference to prevent V8 GC bug
+        this.audioMode = "headphones";
+
+        // Keep-alive intervals
+        this.heartbeatInterval = null;
+        this.speechUnfreezeInterval = null;
 
         // DOM Elements
         this.orb = document.getElementById("orb");
@@ -44,6 +50,7 @@ class AuraVoiceClient {
         this.initVoiceSelector();
         this.initSpeechRecognition();
         this.connectWebSocket();
+        this.startKeepAliveWatchdog();
     }
 
     initEventListeners() {
@@ -78,7 +85,6 @@ class AuraVoiceClient {
                     opt.textContent = `${v.name} (${v.lang})`;
                     this.voiceSelect.appendChild(opt);
 
-                    // Auto-select modern neural/natural voices
                     if (!bestVoice && (v.name.includes("Natural") || v.name.includes("Google") || v.name.includes("Jenny") || v.name.includes("Aria") || v.name.includes("Samantha"))) {
                         bestVoice = v;
                     }
@@ -108,74 +114,126 @@ class AuraVoiceClient {
 
     initSpeechRecognition() {
         const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRec) {
-            this.recognition = new SpeechRec();
-            this.recognition.continuous = true;
-            this.recognition.interimResults = true;
-            this.recognition.lang = "en-US";
+        if (!SpeechRec) return;
 
-            this.recognition.onresult = (event) => {
-                let interim = "";
-                let final = "";
+        try {
+            if (this.recognition) {
+                this.recognition.onresult = null;
+                this.recognition.onerror = null;
+                this.recognition.onend = null;
+                this.recognition.onstart = null;
+                try { this.recognition.abort(); } catch (e) {}
+            }
+        } catch (e) {}
 
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        final += event.results[i][0].transcript;
-                    } else {
-                        interim += event.results[i][0].transcript;
-                    }
+        this.recognition = new SpeechRec();
+        this.recognition.continuous = true;
+        this.recognition.interimResults = true;
+        this.recognition.lang = "en-US";
+
+        this.recognition.onstart = () => {
+            this.recognitionRunning = true;
+        };
+
+        this.recognition.onresult = (event) => {
+            let interim = "";
+            let final = "";
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    final += event.results[i][0].transcript;
+                } else {
+                    interim += event.results[i][0].transcript;
                 }
+            }
 
-                const spokenText = (final || interim).trim();
+            const spokenText = (final || interim).trim();
 
-                // AUTOMATIC VOICE BARGE-IN:
-                // The instant the user speaks words while Aura is talking, IMMEDIATELY halt playback!
-                if (spokenText && (this.isPlayingAudio || ("speechSynthesis" in window && window.speechSynthesis.speaking))) {
-                    console.log("⚡ Voice speech detected during playback -> triggering automatic barge-in!");
-                    this.flushAudioPlayback();
-                    this.handleBargeInInterruption({ barge_in_count: parseInt(this.valBargeIn.textContent || "0") + 1 });
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        this.ws.send(JSON.stringify({ type: "barge_in_interrupt" }));
-                    }
+            // Automatic Voice Barge-in
+            if (spokenText && (this.isPlayingAudio || ("speechSynthesis" in window && window.speechSynthesis.speaking))) {
+                console.log("⚡ User speech detected -> Automatic Voice Barge-in!");
+                this.flushAudioPlayback();
+                this.handleBargeInInterruption({ barge_in_count: parseInt(this.valBargeIn.textContent || "0") + 1 });
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ type: "barge_in_interrupt" }));
                 }
+            }
 
-                if (interim) {
-                    this.renderUserMessage(interim, false);
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        this.ws.send(JSON.stringify({
-                            type: "client_transcript",
-                            text: interim,
-                            is_final: false
-                        }));
-                    }
+            if (interim) {
+                this.renderUserMessage(interim, false);
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: "client_transcript",
+                        text: interim,
+                        is_final: false
+                    }));
                 }
+            }
 
-                if (final) {
-                    this.renderUserMessage(final, true);
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        this.ws.send(JSON.stringify({
-                            type: "client_transcript",
-                            text: final,
-                            is_final: true
-                        }));
-                    }
+            if (final) {
+                this.renderUserMessage(final, true);
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: "client_transcript",
+                        text: final,
+                        is_final: true
+                    }));
                 }
-            };
+            }
+        };
 
-            this.recognition.onerror = (e) => {
-                if (e.error !== "no-speech" && e.error !== "aborted") {
-                    console.warn("Speech recognition warning:", e.error);
-                }
-            };
+        this.recognition.onerror = (e) => {
+            if (e.error !== "no-speech" && e.error !== "aborted") {
+                console.warn("Speech recognition notice:", e.error);
+            }
+        };
 
-            this.recognition.onend = () => {
-                if (this.isRecording && this.recognition) {
-                    try {
-                        this.recognition.start();
-                    } catch (e) {}
-                }
-            };
+        this.recognition.onend = () => {
+            this.recognitionRunning = false;
+            // Immediate debounced resurrection to prevent Chrome silence stalls
+            if (this.isRecording) {
+                setTimeout(() => {
+                    this.safeStartRecognition();
+                }, 100);
+            }
+        };
+    }
+
+    safeStartRecognition() {
+        if (!this.isRecording || !this.recognition || this.recognitionRunning) return;
+        try {
+            this.recognition.start();
+        } catch (e) {
+            // If already started or transitioning, re-instantiate cleanly
+            try {
+                this.initSpeechRecognition();
+                this.recognition.start();
+            } catch (err) {}
         }
+    }
+
+    startKeepAliveWatchdog() {
+        // 1. WebSocket keep-alive ping every 10s
+        setInterval(() => {
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({ type: "ping" }));
+            }
+        }, 10000);
+
+        // 2. Speech recognition watchdog: Ensure recognition never dies after 5-6 sentences
+        setInterval(() => {
+            if (this.isRecording && !this.isPlayingAudio && !this.recognitionRunning) {
+                this.safeStartRecognition();
+            }
+        }, 2000);
+
+        // 3. SpeechSynthesis unfreeze timer (prevents Chrome 15s engine freeze)
+        setInterval(() => {
+            if (window.speechSynthesis && window.speechSynthesis.speaking) {
+                window.speechSynthesis.pause();
+                window.speechSynthesis.resume();
+            }
+        }, 3000);
     }
 
     connectWebSocket() {
@@ -255,7 +313,6 @@ class AuraVoiceClient {
                 break;
 
             case "interrupt":
-                // Automatic voice barge-in triggered from server Silero VAD
                 this.handleBargeInInterruption(msg);
                 break;
         }
@@ -288,6 +345,10 @@ class AuraVoiceClient {
         utterance.rate = 1.15;
         utterance.pitch = 1.0;
 
+        // Store strong root reference to prevent Chromium Bug #679437 garbage-collection freeze!
+        this.currentUtterance = utterance;
+        window._activeUtterance = utterance;
+
         if (this.selectedVoice) {
             utterance.voice = this.selectedVoice;
         } else {
@@ -304,6 +365,8 @@ class AuraVoiceClient {
             if (completed) return;
             completed = true;
             this.isSpeakingQueueActive = false;
+            this.currentUtterance = null;
+            window._activeUtterance = null;
 
             if (this.speechQueue.length > 0) {
                 this.processSpeechQueue();
@@ -311,8 +374,8 @@ class AuraVoiceClient {
                 this.isPlayingAudio = false;
                 this.orb.classList.remove("speaking");
                 this.statusLabel.textContent = this.isRecording ? "Listening... Speak naturally" : "Ready";
-                if (this.isRecording && this.recognition) {
-                    try { this.recognition.start(); } catch (e) {}
+                if (this.isRecording) {
+                    this.safeStartRecognition();
                 }
             }
         };
@@ -320,16 +383,16 @@ class AuraVoiceClient {
         utterance.onend = completeUtterance;
         utterance.onerror = completeUtterance;
 
-        // Failsafe watchdog (6s max per sentence)
+        // Failsafe watchdog timer (5s max per sentence)
         setTimeout(() => {
             if (!completed) completeUtterance();
-        }, 6000);
+        }, 5000);
 
         window.speechSynthesis.speak(utterance);
     }
 
     handleBargeInInterruption(msg) {
-        console.warn("⚡ AUTOMATIC BARGE-IN: Audio playback cancelled by user speech!");
+        console.warn("⚡ AUTOMATIC BARGE-IN: User speech interrupted playback!");
         this.flushAudioPlayback();
 
         this.orb.classList.remove("speaking");
@@ -341,8 +404,8 @@ class AuraVoiceClient {
             this.valBargeIn.textContent = msg.barge_in_count;
         }
 
-        if (this.isRecording && this.recognition) {
-            try { this.recognition.start(); } catch (e) {}
+        if (this.isRecording) {
+            this.safeStartRecognition();
         }
     }
 
@@ -379,7 +442,6 @@ class AuraVoiceClient {
 
             const source = this.audioContext.createMediaStreamSource(this.micStream);
 
-            // Zero gain to mute mic loopback into speakers
             this.zeroGain = this.audioContext.createGain();
             this.zeroGain.gain.value = 0.0;
 
@@ -410,13 +472,9 @@ class AuraVoiceClient {
                 this.zeroGain.connect(this.audioContext.destination);
             }
 
-            if (this.recognition) {
-                try {
-                    this.recognition.start();
-                } catch (e) {}
-            }
-
             this.isRecording = true;
+            this.safeStartRecognition();
+
             this.btnToggle.textContent = "Stop Microphone";
             this.btnToggle.classList.remove("btn-primary");
             this.btnToggle.classList.add("btn-danger");
@@ -441,11 +499,10 @@ class AuraVoiceClient {
             this.scriptProcessor = null;
         }
         if (this.recognition) {
-            try {
-                this.recognition.stop();
-            } catch (e) {}
+            try { this.recognition.stop(); } catch (e) {}
         }
         this.isRecording = false;
+        this.recognitionRunning = false;
         this.btnToggle.textContent = "Start Microphone";
         this.btnToggle.classList.remove("btn-danger");
         this.btnToggle.classList.add("btn-primary");
@@ -502,6 +559,8 @@ class AuraVoiceClient {
     flushAudioPlayback() {
         this.speechQueue = [];
         this.isSpeakingQueueActive = false;
+        this.currentUtterance = null;
+        window._activeUtterance = null;
 
         if ("speechSynthesis" in window) {
             window.speechSynthesis.cancel();
