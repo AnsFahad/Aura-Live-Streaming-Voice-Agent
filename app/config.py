@@ -23,10 +23,10 @@ class Settings(BaseSettings):
     # Silero VAD Configuration
     VAD_MODEL_PATH: str = str(Path(__file__).resolve().parent / "vad" / "models" / "silero_vad.onnx")
     VAD_THRESHOLD: float = 0.5
-    VAD_SPEECH_PAD_FRAMES: int = 3
-    VAD_MIN_SPEECH_DURATION_MS: int = 150
-    VAD_SILENCE_TIMEOUT_MS: int = 600  # Silence duration to conclude speaker turn
-    VAD_BARGE_IN_CONSECUTIVE_FRAMES: int = 3  # ~96ms consecutive speech frames to trigger barge-in
+    VAD_SPEECH_PAD_FRAMES: int = 2
+    VAD_MIN_SPEECH_DURATION_MS: int = 100
+    VAD_SILENCE_TIMEOUT_MS: int = 400  # Snappy 400ms silence timeout for instant turn completion
+    VAD_BARGE_IN_CONSECUTIVE_FRAMES: int = 2  # ~64ms consecutive speech to trigger automatic voice barge-in
 
     # Deepgram ASR Configuration
     DEEPGRAM_API_KEY: str = os.getenv("DEEPGRAM_API_KEY", "")

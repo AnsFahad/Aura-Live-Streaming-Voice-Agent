@@ -90,14 +90,17 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                     elif data.get("type") == "client_transcript":
                         user_text = data.get("text", "").strip()
                         is_final = data.get("is_final", False)
-                        if is_final and user_text:
-                            # User provided a query: if assistant was speaking, trigger barge-in & answer new question!
+                        if user_text:
+                            session.current_user_transcript = user_text
+                            # Automatic voice barge-in: If user speaks while assistant is speaking, cut off immediately!
                             if session.assistant_is_speaking:
                                 await session._trigger_barge_in()
-                            session.current_user_transcript = ""
-                            session._schedule_pipeline(user_text)
-                        else:
-                            await session.asr.inject_client_transcript(user_text, is_final=False)
+
+                            if is_final:
+                                session.current_user_transcript = ""
+                                session._schedule_pipeline(user_text)
+                            else:
+                                await session.asr.inject_client_transcript(user_text, is_final=False)
                     elif data.get("type") == "barge_in_interrupt":
                         await session._trigger_barge_in()
                     elif data.get("type") == "ping":

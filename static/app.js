@@ -18,13 +18,12 @@ class AuraVoiceClient {
         this.speechQueue = [];
         this.isSpeakingQueueActive = false;
         this.selectedVoice = null;
-        this.audioMode = "speakers"; // "headphones" or "speakers"
+        this.audioMode = "headphones"; // Default to headphones for seamless full-duplex barge-in
 
         // DOM Elements
         this.orb = document.getElementById("orb");
         this.statusLabel = document.getElementById("statusLabel");
         this.btnToggle = document.getElementById("btnToggle");
-        this.btnBargeIn = document.getElementById("btnBargeIn");
         this.voiceSelect = document.getElementById("voiceSelect");
         this.audioModeSelect = document.getElementById("audioModeSelect");
         this.connDot = document.getElementById("connDot");
@@ -50,15 +49,14 @@ class AuraVoiceClient {
     initEventListeners() {
         this.btnToggle.addEventListener("click", () => this.toggleMicrophone());
         this.orb.addEventListener("click", () => this.toggleMicrophone());
-        this.btnBargeIn.addEventListener("click", () => this.triggerManualBargeIn());
         this.btnSend.addEventListener("click", () => this.sendTextMessage());
         this.textInput.addEventListener("keydown", (e) => {
             if (e.key === "Enter") this.sendTextMessage();
         });
         if (this.audioModeSelect) {
+            this.audioModeSelect.value = "headphones";
             this.audioModeSelect.addEventListener("change", (e) => {
                 this.audioMode = e.target.value;
-                console.log("Audio mode set to:", this.audioMode);
             });
         }
     }
@@ -80,7 +78,7 @@ class AuraVoiceClient {
                     opt.textContent = `${v.name} (${v.lang})`;
                     this.voiceSelect.appendChild(opt);
 
-                    // Pick natural sounding neural voice as default
+                    // Auto-select modern neural/natural voices
                     if (!bestVoice && (v.name.includes("Natural") || v.name.includes("Google") || v.name.includes("Jenny") || v.name.includes("Aria") || v.name.includes("Samantha"))) {
                         bestVoice = v;
                     }
@@ -117,16 +115,6 @@ class AuraVoiceClient {
             this.recognition.lang = "en-US";
 
             this.recognition.onresult = (event) => {
-                // In Speaker Mode: ignore speech recognition if assistant is playing through open speakers
-                if (this.audioMode === "speakers" && (this.isPlayingAudio || ("speechSynthesis" in window && window.speechSynthesis.speaking))) {
-                    return;
-                }
-
-                // If user speaks in Headphones Mode while assistant is playing: BARGE-IN!
-                if (this.isPlayingAudio) {
-                    this.triggerManualBargeIn();
-                }
-
                 let interim = "";
                 let final = "";
 
@@ -135,6 +123,19 @@ class AuraVoiceClient {
                         final += event.results[i][0].transcript;
                     } else {
                         interim += event.results[i][0].transcript;
+                    }
+                }
+
+                const spokenText = (final || interim).trim();
+
+                // AUTOMATIC VOICE BARGE-IN:
+                // The instant the user speaks words while Aura is talking, IMMEDIATELY halt playback!
+                if (spokenText && (this.isPlayingAudio || ("speechSynthesis" in window && window.speechSynthesis.speaking))) {
+                    console.log("⚡ Voice speech detected during playback -> triggering automatic barge-in!");
+                    this.flushAudioPlayback();
+                    this.handleBargeInInterruption({ barge_in_count: parseInt(this.valBargeIn.textContent || "0") + 1 });
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.ws.send(JSON.stringify({ type: "barge_in_interrupt" }));
                     }
                 }
 
@@ -254,6 +255,7 @@ class AuraVoiceClient {
                 break;
 
             case "interrupt":
+                // Automatic voice barge-in triggered from server Silero VAD
                 this.handleBargeInInterruption(msg);
                 break;
         }
@@ -283,7 +285,7 @@ class AuraVoiceClient {
         }
 
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.05;
+        utterance.rate = 1.08;
         utterance.pitch = 1.0;
 
         if (this.selectedVoice) {
@@ -318,29 +320,21 @@ class AuraVoiceClient {
         utterance.onend = completeUtterance;
         utterance.onerror = completeUtterance;
 
-        // Failsafe watchdog (7s max)
+        // Failsafe watchdog (6s max per sentence)
         setTimeout(() => {
             if (!completed) completeUtterance();
-        }, 7000);
+        }, 6000);
 
         window.speechSynthesis.speak(utterance);
     }
 
-    triggerManualBargeIn() {
-        console.warn("⚡ Manual Barge-In Triggered!");
-        this.flushAudioPlayback();
-        this.handleBargeInInterruption({ barge_in_count: parseInt(this.valBargeIn.textContent || "0") + 1 });
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({ type: "barge_in_interrupt" }));
-        }
-    }
-
     handleBargeInInterruption(msg) {
+        console.warn("⚡ AUTOMATIC BARGE-IN: Audio playback cancelled by user speech!");
         this.flushAudioPlayback();
 
         this.orb.classList.remove("speaking");
         this.orb.classList.add("interrupted");
-        this.statusLabel.textContent = "Interrupted! Listening to you...";
+        this.statusLabel.textContent = "Interrupted! Listening to your voice...";
         setTimeout(() => this.orb.classList.remove("interrupted"), 400);
 
         if (this.valBargeIn && msg.barge_in_count) {
