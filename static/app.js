@@ -321,7 +321,7 @@ class AuraVoiceClient {
     speakNaturalVoice(text) {
         if (!("speechSynthesis" in window)) return;
 
-        const clean = text.replace(/[*#_`]/g, "").trim();
+        const clean = text.replace(/[*#_`~>\[\]]/g, "").replace(/\n+/g, " ").trim();
         if (!clean) return;
 
         this.speechQueue.push(clean);

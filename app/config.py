@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     LLM_API_BASE: str = os.getenv("LLM_API_BASE", "https://api.groq.com/openai/v1")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen/qwen3.8-27b")
     LLM_TEMPERATURE: float = 0.6
-    LLM_MAX_TOKENS: int = 70
+    LLM_MAX_TOKENS: int = 500
 
     # Cartesia AI TTS Configuration
     CARTESIA_API_KEY: str = os.getenv("CARTESIA_API_KEY", "")
