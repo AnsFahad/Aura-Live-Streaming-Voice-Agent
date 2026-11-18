@@ -91,9 +91,9 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                         user_text = data.get("text", "").strip()
                         is_final = data.get("is_final", False)
                         if is_final and user_text:
-                            # If assistant is currently outputting speech, suppress echo triggers
+                            # User provided a query: if assistant was speaking, trigger barge-in & answer new question!
                             if session.assistant_is_speaking:
-                                continue
+                                await session._trigger_barge_in()
                             session.current_user_transcript = ""
                             session._schedule_pipeline(user_text)
                         else:
