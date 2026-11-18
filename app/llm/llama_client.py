@@ -8,11 +8,25 @@ from app.config import settings
 
 logger = logging.getLogger("aura.llm")
 
-AURA_SYSTEM_PROMPT = """You are Aura, an ultra-fast, natural conversational voice assistant.
-Always answer in 1 or 2 short, direct, conversational sentences (under 30 words maximum).
-Never use markdown, asterisks, bullet points, numbered lists, or headers, because your output is spoken directly aloud to the user.
-Answer any question helpfully and naturally.
+from datetime import datetime
+
+def get_dynamic_system_prompt() -> str:
+    now = datetime.now()
+    date_str = now.strftime("%A, %B %d, %Y")
+    time_str = now.strftime("%I:%M %p")
+    return f"""You are Aura, an ultra-fast, natural conversational voice assistant.
+Real-Time Context:
+- Today's Date: {date_str}
+- Current Time: {time_str}
+
+Guidelines:
+- Always answer in 1 or 2 short, direct, conversational sentences (under 30 words maximum).
+- Never use markdown, asterisks, bullet points, numbered lists, or headers, because your output is spoken directly aloud to the user.
+- Answer any question helpfully and naturally.
+- When asked about live social media trends like Instagram, highlight popular formats like viral short-form Reels, trending audio clips, and photo carousels rather than refusing.
 """
+
+AURA_SYSTEM_PROMPT = get_dynamic_system_prompt()
 
 class LlamaClient:
     """
@@ -50,7 +64,7 @@ class LlamaClient:
             "Content-Type": "application/json"
         }
 
-        payload_messages = [{"role": "system", "content": AURA_SYSTEM_PROMPT}]
+        payload_messages = [{"role": "system", "content": get_dynamic_system_prompt()}]
         for m in messages:
             if m.get("role") != "system":
                 payload_messages.append(m)
@@ -136,7 +150,17 @@ class LlamaClient:
         elif any(w in last_user_msg for w in ["concurrency", "concurrent", "100 sessions", "scale"]):
             response_text = "I handle 100 concurrent sessions using Python asyncio coroutines and WebSocket managers, keeping memory footprint around 10 megabytes per active session."
 
-        # 3. Simple Math & Facts
+        # 3. Date, Time & Social Media
+        elif any(w in last_user_msg for w in ["today's date", "date today", "what is the date", "what day is", "what's the date"]):
+            now = datetime.now()
+            response_text = f"Today is {now.strftime('%A, %B %d, %Y')}."
+        elif any(w in last_user_msg for w in ["what time is it", "current time", "what's the time"]):
+            now = datetime.now()
+            response_text = f"The current time is {now.strftime('%I:%M %p')}."
+        elif any(w in last_user_msg for w in ["instagram", "trending on instagram", "trending today", "trend"]):
+            response_text = "On Instagram right now, viral short-form Reels with trending audio clips and storytelling photo carousels are generating the highest engagement."
+
+        # 4. Simple Math & Facts
         elif any(w in last_user_msg for w in ["plus", "minus", "times", "divided by", "math", "+", "-", "*", "/"]):
             # Simple arithmetic evaluator
             try:
