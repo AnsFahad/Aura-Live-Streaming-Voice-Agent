@@ -91,6 +91,9 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                         user_text = data.get("text", "").strip()
                         is_final = data.get("is_final", False)
                         if is_final and user_text:
+                            # If assistant is currently outputting speech, suppress echo triggers
+                            if session.assistant_is_speaking:
+                                continue
                             session.current_user_transcript = ""
                             session._schedule_pipeline(user_text)
                         else:
@@ -100,8 +103,8 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                 except Exception as e:
                     logger.error(f"Error parsing incoming JSON: {e}")
 
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected normally for session: {session_id}")
+    except (WebSocketDisconnect, RuntimeError):
+        logger.info(f"WebSocket session closed cleanly: {session_id}")
     except Exception as e:
         logger.error(f"Unexpected error in session {session_id}: {e}")
     finally:

@@ -7,13 +7,12 @@ from app.config import settings
 
 logger = logging.getLogger("aura.llm")
 
-# System prompt optimized for low-latency conversational voice agent
 AURA_SYSTEM_PROMPT = """You are Aura, an ultra-fast, intelligent, and natural conversational voice AI.
 You talk like a real human: warm, concise, engaging, and direct.
 Guidelines:
-- Keep answers brief and conversational (1 to 3 short sentences max).
+- Keep answers brief and conversational (1 to 2 short sentences max).
 - Do not use markdown bullet points, asterisks, or formatting, since your response will be spoken aloud by TTS.
-- Sound natural and confident.
+- Sound natural, friendly, and helpful.
 """
 
 class LlamaClient:
@@ -52,7 +51,6 @@ class LlamaClient:
             "Content-Type": "application/json"
         }
 
-        # Ensure system prompt is present
         payload_messages = [{"role": "system", "content": AURA_SYSTEM_PROMPT}]
         for m in messages:
             if m.get("role") != "system":
@@ -100,29 +98,37 @@ class LlamaClient:
     async def _mock_stream_chat(self, messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
         """
         High-fidelity offline simulation:
-        Generates realistic contextual conversational replies with realistic token streaming latency.
+        Generates realistic conversational responses with natural token streaming latency.
         """
         last_user_msg = "hello"
         for m in reversed(messages):
             if m.get("role") == "user":
-                last_user_msg = m.get("content", "").lower()
+                last_user_msg = m.get("content", "").lower().strip()
                 break
 
-        # Context-aware simulated responses
-        if any(w in last_user_msg for w in ["who are you", "what is aura", "what are you"]):
-            response_text = "I am Aura, a low-latency live streaming voice agent. I can talk with you in real-time, process speech with sub-500 millisecond response times, and handle interruptions naturally."
-        elif any(w in last_user_msg for w in ["how does it work", "architecture", "latency", "vad", "barge in"]):
-            response_text = "I run on an asynchronous streaming pipeline with Silero VAD, Deepgram speech recognition, Llama 3, and Cartesia voice synthesis. My sentence boundary buffer begins speaking before the full thought finishes generating."
-        elif any(w in last_user_msg for w in ["weather", "temperature"]):
-            response_text = "It feels crisp and clear right now. Perfect weather for testing out low-latency speech pipelines!"
+        # Context-aware responses without echoing the user's phrase
+        if any(w in last_user_msg for w in ["hello", "hi", "hey"]):
+            response_text = "Hello there! I am Aura, your live streaming voice assistant. How are you doing today?"
+        elif any(w in last_user_msg for w in ["who are you", "what is aura", "what are you", "your name"]):
+            response_text = "I am Aura, a conversational voice agent engineered for ultra low latency using WebSockets, Silero VAD, and sentence boundary buffering."
+        elif any(w in last_user_msg for w in ["how does it work", "architecture", "latency", "pipeline"]):
+            response_text = "My architecture overlaps speech recognition, token generation, and audio synthesis in parallel to deliver responses in under 500 milliseconds."
+        elif any(w in last_user_msg for w in ["barge in", "interrupt", "vad"]):
+            response_text = "Silero VAD monitors incoming audio frames. If you speak while I am talking, I stop immediately so you have full control."
+        elif any(w in last_user_msg for w in ["weather", "temperature", "rain"]):
+            response_text = "The forecast looks great right now. Mild temperatures and clear skies!"
         elif any(w in last_user_msg for w in ["joke", "funny"]):
-            response_text = "Why did the neural network cross the road? To optimize the loss function on the other side!"
+            response_text = "Why did the developer go broke? Because they used up all their cache!"
+        elif any(w in last_user_msg for w in ["thank", "thanks"]):
+            response_text = "You are very welcome! Let me know if there is anything else you need."
+        elif any(w in last_user_msg for w in ["bye", "goodbye"]):
+            response_text = "Goodbye! It was great talking with you. Have a wonderful day!"
         else:
-            response_text = f"I hear you loud and clear! You said '{last_user_msg}'. Everything in the real-time audio pipeline is streaming seamlessly with sub-500 millisecond latency."
+            response_text = "That sounds interesting. Tell me more, or ask me any question about the voice pipeline."
 
         words = response_text.split(" ")
         for i, word in enumerate(words):
             token = word if i == len(words) - 1 else word + " "
             yield token
-            # Simulate ultra-fast token streaming (~25ms per token = ~40 words/sec)
+            # Paced token generation (~25ms per token)
             await asyncio.sleep(0.025)

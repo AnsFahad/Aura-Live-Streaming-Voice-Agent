@@ -113,7 +113,10 @@ class VoiceActivityDetector:
             prob = self.vad.process_frame(audio_float32)
             last_prob = prob
 
-            if prob >= self.threshold:
+            effective_threshold = 0.72 if assistant_is_speaking else self.threshold
+            barge_in_needed_frames = max(4, self.barge_in_consecutive_frames)
+
+            if prob >= effective_threshold:
                 self.consecutive_speech_frames += 1
                 self.consecutive_silence_frames = 0
                 self.silence_duration_ms = 0.0
@@ -122,7 +125,7 @@ class VoiceActivityDetector:
                     self.is_speech_active = True
 
                 # Check barge-in: User speaks while assistant is generating/speaking audio
-                if assistant_is_speaking and self.consecutive_speech_frames >= self.barge_in_consecutive_frames:
+                if assistant_is_speaking and self.consecutive_speech_frames >= barge_in_needed_frames:
                     barge_in_triggered = True
             else:
                 self.consecutive_silence_frames += 1

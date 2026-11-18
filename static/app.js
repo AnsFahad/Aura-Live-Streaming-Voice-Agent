@@ -57,6 +57,13 @@ class AuraVoiceClient {
             this.recognition.lang = "en-US";
 
             this.recognition.onresult = (event) => {
+                // ACOUSTIC ECHO CANCELLATION:
+                // If Aura is currently speaking aloud, IGNORE speech recognition results
+                // so the microphone does NOT transcribe the assistant's own voice from the speakers!
+                if (this.isPlayingAudio || ("speechSynthesis" in window && window.speechSynthesis.speaking)) {
+                    return;
+                }
+
                 let interim = "";
                 let final = "";
 
@@ -92,15 +99,14 @@ class AuraVoiceClient {
             };
 
             this.recognition.onerror = (e) => {
-                // Ignore silent no-speech events
-                if (e.error !== "no-speech") {
-                    console.warn("Speech recognition error:", e.error);
+                if (e.error !== "no-speech" && e.error !== "aborted") {
+                    console.warn("Speech recognition warning:", e.error);
                 }
             };
 
             this.recognition.onend = () => {
-                // Automatically keep listening if user hasn't toggled off
-                if (this.isRecording && this.recognition) {
+                // If microphone is still toggled on and assistant is not speaking, keep listening
+                if (this.isRecording && !this.isPlayingAudio && this.recognition) {
                     try {
                         this.recognition.start();
                     } catch (e) {}
@@ -124,7 +130,6 @@ class AuraVoiceClient {
 
         this.ws.onmessage = async (event) => {
             if (event.data instanceof ArrayBuffer) {
-                // Binary PCM audio chunk from Cartesia
                 this.queueAudioChunk(event.data);
             } else {
                 try {
@@ -171,7 +176,6 @@ class AuraVoiceClient {
                 break;
 
             case "speak_sentence":
-                // Spoken chunk from Sentence Boundary Buffer (simulation mode)
                 this.speakNaturalVoice(msg.text);
                 break;
 
@@ -196,15 +200,18 @@ class AuraVoiceClient {
     speakNaturalVoice(text) {
         if (!("speechSynthesis" in window)) return;
 
-        // Clean text (remove formatting)
         const clean = text.replace(/[*#_`]/g, "").trim();
         if (!clean) return;
 
+        // Pause speech recognition while speaker is outputting sound
+        if (this.recognition) {
+            try { this.recognition.abort(); } catch (e) {}
+        }
+
         const utterance = new SpeechSynthesisUtterance(clean);
-        utterance.rate = 1.08; // Natural conversational tempo
+        utterance.rate = 1.05;
         utterance.pitch = 1.0;
 
-        // Select a natural high quality English voice if available
         const voices = window.speechSynthesis.getVoices();
         const preferred = voices.find(v =>
             v.lang.startsWith("en") &&
@@ -217,28 +224,38 @@ class AuraVoiceClient {
         this.statusLabel.textContent = "Aura speaking...";
 
         utterance.onend = () => {
-            if (!window.speechSynthesis.speaking) {
-                this.isPlayingAudio = false;
-                this.orb.classList.remove("speaking");
-                this.statusLabel.textContent = this.isRecording ? "Listening... Speak anytime" : "Ready";
-            }
+            // Buffer delay (350ms) to ensure room acoustic reverberation is gone before re-enabling mic recognition
+            setTimeout(() => {
+                if (!window.speechSynthesis.speaking) {
+                    this.isPlayingAudio = false;
+                    this.orb.classList.remove("speaking");
+                    this.statusLabel.textContent = this.isRecording ? "Listening... Speak naturally" : "Ready";
+                    if (this.isRecording && this.recognition) {
+                        try { this.recognition.start(); } catch (e) {}
+                    }
+                }
+            }, 350);
         };
 
         window.speechSynthesis.speak(utterance);
     }
 
     handleBargeInInterruption(msg) {
-        console.warn("⚡ BARGE-IN TRIGGERED: User interrupted assistant playback!");
+        console.warn("⚡ BARGE-IN TRIGGERED: User interrupted playback!");
         this.flushAudioPlayback();
 
-        // Visual flash & counter update
         this.orb.classList.remove("speaking");
         this.orb.classList.add("interrupted");
-        this.statusLabel.textContent = "Interrupted! Listening to you...";
+        this.statusLabel.textContent = "Listening to your interruption...";
         setTimeout(() => this.orb.classList.remove("interrupted"), 400);
 
         if (this.valBargeIn && msg.barge_in_count) {
             this.valBargeIn.textContent = msg.barge_in_count;
+        }
+
+        // Immediately restart recognition so we catch the user's interruption text
+        if (this.isRecording && this.recognition) {
+            try { this.recognition.start(); } catch (e) {}
         }
     }
 
@@ -271,11 +288,10 @@ class AuraVoiceClient {
 
             const source = this.audioContext.createMediaStreamSource(this.micStream);
 
-            // Create a zero-gain node to completely mute mic loopback to speakers (NO ECHO / DISTURBANCE)
+            // Completely mute microphone loopback into speakers
             this.zeroGain = this.audioContext.createGain();
             this.zeroGain.gain.value = 0.0;
 
-            // AudioWorklet setup
             try {
                 await this.audioContext.audioWorklet.addModule("/static/pcm-processor.js");
                 this.workletNode = new AudioWorkletNode(this.audioContext, "pcm-processor");
@@ -286,7 +302,6 @@ class AuraVoiceClient {
                 };
                 source.connect(this.workletNode);
             } catch (workletErr) {
-                // ScriptProcessor fallback
                 this.scriptProcessor = this.audioContext.createScriptProcessor(512, 1, 1);
                 this.scriptProcessor.onaudioprocess = (e) => {
                     const inputData = e.inputBuffer.getChannelData(0);
@@ -300,12 +315,10 @@ class AuraVoiceClient {
                     }
                 };
                 source.connect(this.scriptProcessor);
-                // Connect to zero-gain node so audio NEVER plays into speakers
                 this.scriptProcessor.connect(this.zeroGain);
                 this.zeroGain.connect(this.audioContext.destination);
             }
 
-            // Start speech recognition if supported
             if (this.recognition) {
                 try {
                     this.recognition.start();
@@ -396,12 +409,10 @@ class AuraVoiceClient {
     }
 
     flushAudioPlayback() {
-        // Stop browser speech synthesis immediately
         if ("speechSynthesis" in window) {
             window.speechSynthesis.cancel();
         }
 
-        // Stop raw Web Audio sources
         for (const source of this.activeSourceNodes) {
             try {
                 source.stop();
@@ -467,7 +478,6 @@ class AuraVoiceClient {
 
 // Initialize on page load
 window.addEventListener("DOMContentLoaded", () => {
-    // Prime voices
     if ("speechSynthesis" in window) {
         window.speechSynthesis.getVoices();
     }
