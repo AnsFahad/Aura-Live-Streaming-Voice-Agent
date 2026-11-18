@@ -57,44 +57,54 @@ class LlamaClient:
             if m.get("role") != "system":
                 payload_messages.append(m)
 
-        payload = {
-            "model": self.model,
-            "messages": payload_messages,
-            "stream": True,
-            "temperature": temperature,
-            "max_tokens": max_tokens
-        }
+        candidate_models = [self.model, "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "allam-2-7b"]
+        # Deduplicate while preserving order
+        candidate_models = list(dict.fromkeys(candidate_models))
 
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                async with client.stream("POST", f"{self.api_base}/chat/completions", headers=headers, json=payload) as response:
-                    if response.status_code != 200:
-                        error_body = await response.aread()
-                        logger.error(f"LLM API Error {response.status_code}: {error_body.decode('utf-8', errors='ignore')}")
-                        yield "I had a momentary glitch connecting to my speech brain. Could you repeat that?"
-                        return
+        for candidate in candidate_models:
+            payload = {
+                "model": candidate,
+                "messages": payload_messages,
+                "stream": True,
+                "temperature": temperature,
+                "max_tokens": max_tokens
+            }
 
-                    async for line in response.aiter_lines():
-                        if not line:
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    async with client.stream("POST", f"{self.api_base}/chat/completions", headers=headers, json=payload) as response:
+                        if response.status_code == 404:
+                            logger.warning(f"Model {candidate} not found on Groq, trying next fallback...")
                             continue
-                        if line.startswith("data: "):
-                            data_str = line[6:].strip()
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data_str)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except json.JSONDecodeError:
+                        elif response.status_code != 200:
+                            error_body = await response.aread()
+                            logger.error(f"LLM API Error {response.status_code}: {error_body.decode('utf-8', errors='ignore')}")
+                            yield "I had a momentary glitch connecting to my speech brain. Could you repeat that?"
+                            return
+
+                        async for line in response.aiter_lines():
+                            if not line:
                                 continue
-        except asyncio.CancelledError:
-            logger.info("LLM stream cancelled due to barge-in.")
-            raise
-        except Exception as e:
-            logger.error(f"Exception during LLM streaming: {e}")
-            yield "Sorry, I had trouble processing that request."
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    chunk = json.loads(data_str)
+                                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                    content = delta.get("content", "")
+                                    if content:
+                                        yield content
+                                except json.JSONDecodeError:
+                                    continue
+                        # Successfully streamed
+                        return
+            except asyncio.CancelledError:
+                logger.info("LLM stream cancelled due to barge-in.")
+                raise
+            except Exception as e:
+                logger.error(f"Exception streaming from {candidate}: {e}")
+                continue
 
     async def _mock_stream_chat(self, messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
         """

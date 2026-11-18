@@ -33,10 +33,10 @@ class Settings(BaseSettings):
     DEEPGRAM_MODEL: str = "nova-2"
     DEEPGRAM_WS_URL: str = "wss://api.deepgram.com/v1/listen"
 
-    # LLM (Llama 3 via Groq or OpenAI-compatible endpoint)
+    # LLM (Groq / OpenAI-compatible endpoint)
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     LLM_API_BASE: str = os.getenv("LLM_API_BASE", "https://api.groq.com/openai/v1")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "openai/gpt-oss-20b")
     LLM_TEMPERATURE: float = 0.6
     LLM_MAX_TOKENS: int = 300
 
