@@ -87,6 +87,14 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                         user_text = data.get("text", "").strip()
                         if user_text:
                             session._schedule_pipeline(user_text)
+                    elif data.get("type") == "client_transcript":
+                        user_text = data.get("text", "").strip()
+                        is_final = data.get("is_final", False)
+                        if is_final and user_text:
+                            session.current_user_transcript = ""
+                            session._schedule_pipeline(user_text)
+                        else:
+                            await session.asr.inject_client_transcript(user_text, is_final=False)
                     elif data.get("type") == "ping":
                         await session._send_control({"type": "pong"})
                 except Exception as e:

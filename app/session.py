@@ -207,7 +207,6 @@ class SessionContext:
 
         except asyncio.CancelledError:
             logger.info("Pipeline cancelled mid-generation by barge-in.")
-            # Truncate conversation history to what was actually voiced
             if spoken_sentences:
                 actual_spoken = " ".join(spoken_sentences)
                 self.conversation_history.append({"role": "assistant", "content": actual_spoken})
@@ -216,21 +215,32 @@ class SessionContext:
             self.assistant_is_speaking = False
 
     async def _synthesize_and_stream_audio(self, sentence: str, is_last: bool, start_time: float):
-        """Streams a sentence chunk through Cartesia TTS and delivers audio packets to WebSocket."""
+        """Streams a sentence chunk through Cartesia TTS or speaks via natural voice."""
         logger.debug(f"Synthesizing sentence chunk: '{sentence}'")
         
-        async for audio_chunk in self.tts.stream_speech(sentence, is_last_chunk=is_last):
-            # Check Time-To-First-Audio (TTFA)
-            if not self.first_audio_timestamp:
-                self.first_audio_timestamp = time.perf_counter()
-                ttfa_ms = round((self.first_audio_timestamp - start_time) * 1000, 1)
-                logger.info(f"⚡ Time-To-First-Audio (Response Latency): {ttfa_ms}ms")
-                await self._send_control({
-                    "type": "metric_ttfa",
-                    "ttfa_ms": ttfa_ms
-                })
+        # Check Time-To-First-Audio (TTFA)
+        if not self.first_audio_timestamp:
+            self.first_audio_timestamp = time.perf_counter()
+            ttfa_ms = round((self.first_audio_timestamp - start_time) * 1000, 1)
+            logger.info(f"⚡ Time-To-First-Audio (Response Latency): {ttfa_ms}ms")
+            await self._send_control({
+                "type": "metric_ttfa",
+                "ttfa_ms": ttfa_ms
+            })
 
-            # Send binary audio chunk down WebSocket
+        if settings.is_mock_tts:
+            # Deliver complete sentence chunk to client for natural human voice playback!
+            await self._send_control({
+                "type": "speak_sentence",
+                "text": sentence,
+                "is_last": is_last
+            })
+            # Sleep brief duration proportional to words to maintain natural conversational pacing
+            word_count = len(sentence.split())
+            await asyncio.sleep(min(1.5, word_count * 0.25))
+            return
+
+        async for audio_chunk in self.tts.stream_speech(sentence, is_last_chunk=is_last):
             await self.client_ws.send_bytes(audio_chunk)
 
     async def _trigger_barge_in(self):

@@ -6,13 +6,15 @@ class AuraVoiceClient {
         this.micStream = null;
         this.workletNode = null;
         this.scriptProcessor = null;
+        this.zeroGain = null;
+        this.recognition = null;
         this.isRecording = false;
 
-        // Audio playback queue
-        this.playbackQueue = [];
+        // Audio playback state
+        this.activeSourceNodes = [];
         this.isPlayingAudio = false;
         this.nextPlaybackTime = 0;
-        this.activeSourceNodes = [];
+        this.isMockMode = true;
 
         // DOM Elements
         this.orb = document.getElementById("orb");
@@ -33,6 +35,7 @@ class AuraVoiceClient {
         this.currentUserBubble = null;
 
         this.initEventListeners();
+        this.initSpeechRecognition();
         this.connectWebSocket();
     }
 
@@ -43,6 +46,67 @@ class AuraVoiceClient {
         this.textInput.addEventListener("keydown", (e) => {
             if (e.key === "Enter") this.sendTextMessage();
         });
+    }
+
+    initSpeechRecognition() {
+        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRec) {
+            this.recognition = new SpeechRec();
+            this.recognition.continuous = true;
+            this.recognition.interimResults = true;
+            this.recognition.lang = "en-US";
+
+            this.recognition.onresult = (event) => {
+                let interim = "";
+                let final = "";
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        final += event.results[i][0].transcript;
+                    } else {
+                        interim += event.results[i][0].transcript;
+                    }
+                }
+
+                if (interim) {
+                    this.renderUserMessage(interim, false);
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.ws.send(JSON.stringify({
+                            type: "client_transcript",
+                            text: interim,
+                            is_final: false
+                        }));
+                    }
+                }
+
+                if (final) {
+                    this.renderUserMessage(final, true);
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.ws.send(JSON.stringify({
+                            type: "client_transcript",
+                            text: final,
+                            is_final: true
+                        }));
+                    }
+                }
+            };
+
+            this.recognition.onerror = (e) => {
+                // Ignore silent no-speech events
+                if (e.error !== "no-speech") {
+                    console.warn("Speech recognition error:", e.error);
+                }
+            };
+
+            this.recognition.onend = () => {
+                // Automatically keep listening if user hasn't toggled off
+                if (this.isRecording && this.recognition) {
+                    try {
+                        this.recognition.start();
+                    } catch (e) {}
+                }
+            };
+        }
     }
 
     connectWebSocket() {
@@ -60,15 +124,14 @@ class AuraVoiceClient {
 
         this.ws.onmessage = async (event) => {
             if (event.data instanceof ArrayBuffer) {
-                // Incoming binary 16kHz PCM audio chunk from Cartesia/backend
+                // Binary PCM audio chunk from Cartesia
                 this.queueAudioChunk(event.data);
             } else {
-                // Incoming JSON control message
                 try {
                     const msg = JSON.parse(event.data);
                     this.handleControlMessage(msg);
                 } catch (e) {
-                    console.error("Failed to parse JSON control frame:", e);
+                    console.error("Failed to parse control frame:", e);
                 }
             }
         };
@@ -76,7 +139,7 @@ class AuraVoiceClient {
         this.ws.onclose = () => {
             this.connDot.classList.remove("connected");
             this.connStatus.textContent = "Disconnected";
-            this.statusLabel.textContent = "Reconnecting in 2s...";
+            this.statusLabel.textContent = "Reconnecting...";
             setTimeout(() => this.connectWebSocket(), 2000);
         };
     }
@@ -86,7 +149,8 @@ class AuraVoiceClient {
             case "connected":
                 if (this.valMode) {
                     const modes = msg.modes || {};
-                    this.valMode.textContent = modes.asr_mode === "mock" ? "Simulation" : "Production";
+                    this.isMockMode = (modes.tts_mode === "mock");
+                    this.valMode.textContent = this.isMockMode ? "Simulation" : "Production";
                 }
                 break;
 
@@ -104,6 +168,11 @@ class AuraVoiceClient {
 
             case "assistant_transcript":
                 this.renderAssistantMessage(msg.text, msg.is_final);
+                break;
+
+            case "speak_sentence":
+                // Spoken chunk from Sentence Boundary Buffer (simulation mode)
+                this.speakNaturalVoice(msg.text);
                 break;
 
             case "metric_ttfa":
@@ -124,8 +193,42 @@ class AuraVoiceClient {
         }
     }
 
+    speakNaturalVoice(text) {
+        if (!("speechSynthesis" in window)) return;
+
+        // Clean text (remove formatting)
+        const clean = text.replace(/[*#_`]/g, "").trim();
+        if (!clean) return;
+
+        const utterance = new SpeechSynthesisUtterance(clean);
+        utterance.rate = 1.08; // Natural conversational tempo
+        utterance.pitch = 1.0;
+
+        // Select a natural high quality English voice if available
+        const voices = window.speechSynthesis.getVoices();
+        const preferred = voices.find(v =>
+            v.lang.startsWith("en") &&
+            (v.name.includes("Natural") || v.name.includes("Google") || v.name.includes("Microsoft") || v.name.includes("Jenny") || v.name.includes("Aria"))
+        );
+        if (preferred) utterance.voice = preferred;
+
+        this.isPlayingAudio = true;
+        this.orb.classList.add("speaking");
+        this.statusLabel.textContent = "Aura speaking...";
+
+        utterance.onend = () => {
+            if (!window.speechSynthesis.speaking) {
+                this.isPlayingAudio = false;
+                this.orb.classList.remove("speaking");
+                this.statusLabel.textContent = this.isRecording ? "Listening... Speak anytime" : "Ready";
+            }
+        };
+
+        window.speechSynthesis.speak(utterance);
+    }
+
     handleBargeInInterruption(msg) {
-        console.warn("Barge-in interrupt received! Stopping client playback.");
+        console.warn("⚡ BARGE-IN TRIGGERED: User interrupted assistant playback!");
         this.flushAudioPlayback();
 
         // Visual flash & counter update
@@ -168,7 +271,11 @@ class AuraVoiceClient {
 
             const source = this.audioContext.createMediaStreamSource(this.micStream);
 
-            // Try AudioWorklet first
+            // Create a zero-gain node to completely mute mic loopback to speakers (NO ECHO / DISTURBANCE)
+            this.zeroGain = this.audioContext.createGain();
+            this.zeroGain.gain.value = 0.0;
+
+            // AudioWorklet setup
             try {
                 await this.audioContext.audioWorklet.addModule("/static/pcm-processor.js");
                 this.workletNode = new AudioWorkletNode(this.audioContext, "pcm-processor");
@@ -179,7 +286,7 @@ class AuraVoiceClient {
                 };
                 source.connect(this.workletNode);
             } catch (workletErr) {
-                console.warn("AudioWorklet fallback to ScriptProcessor:", workletErr);
+                // ScriptProcessor fallback
                 this.scriptProcessor = this.audioContext.createScriptProcessor(512, 1, 1);
                 this.scriptProcessor.onaudioprocess = (e) => {
                     const inputData = e.inputBuffer.getChannelData(0);
@@ -193,7 +300,16 @@ class AuraVoiceClient {
                     }
                 };
                 source.connect(this.scriptProcessor);
-                this.scriptProcessor.connect(this.audioContext.destination);
+                // Connect to zero-gain node so audio NEVER plays into speakers
+                this.scriptProcessor.connect(this.zeroGain);
+                this.zeroGain.connect(this.audioContext.destination);
+            }
+
+            // Start speech recognition if supported
+            if (this.recognition) {
+                try {
+                    this.recognition.start();
+                } catch (e) {}
             }
 
             this.isRecording = true;
@@ -219,6 +335,11 @@ class AuraVoiceClient {
         if (this.scriptProcessor) {
             this.scriptProcessor.disconnect();
             this.scriptProcessor = null;
+        }
+        if (this.recognition) {
+            try {
+                this.recognition.stop();
+            } catch (e) {}
         }
         this.isRecording = false;
         this.btnToggle.textContent = "Start Microphone";
@@ -275,6 +396,12 @@ class AuraVoiceClient {
     }
 
     flushAudioPlayback() {
+        // Stop browser speech synthesis immediately
+        if ("speechSynthesis" in window) {
+            window.speechSynthesis.cancel();
+        }
+
+        // Stop raw Web Audio sources
         for (const source of this.activeSourceNodes) {
             try {
                 source.stop();
@@ -340,5 +467,9 @@ class AuraVoiceClient {
 
 // Initialize on page load
 window.addEventListener("DOMContentLoaded", () => {
+    // Prime voices
+    if ("speechSynthesis" in window) {
+        window.speechSynthesis.getVoices();
+    }
     window.auraClient = new AuraVoiceClient();
 });
